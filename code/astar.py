@@ -1,46 +1,43 @@
 #!/usr/bin/env python3
 """
-dijkstra.py
+astar.py
 
 Author: Qizhen Dong
 
 Read maze.json from the maze_runner root directory and complete the maze task
-using WEIGHTED Dijkstra search.
+using WEIGHTED A* search.
 
-Weighted rule:
-- Outer ring cells have weight 1
-- Every deeper ring increases weight by +1
-- Moving into a cell costs the weight of that destination cell
+New rules applied:
+1. Weighted grid:
+   - outer ring cells have weight 1
+   - each deeper ring increases weight by +1
+   - moving into a cell costs the weight of that destination cell
+2. Directional search hint for A*:
+   - at the start of each key-search phase, compute the current position's
+     center-symmetric cell: (rows - 1 - r, cols - 1 - c)
+   - this mirrored cell is used as a reference direction
+   - when searching for the next key, ties are biased toward cells that are
+     closer to this mirrored reference target
 
-Unified task rule implemented here:
+Unified search / routing rule:
 1. Start from the entrance.
 2. The exit position is known.
-3. During the SEARCH phase, key positions are treated as unknown targets:
-   - run a weighted Dijkstra outward search from the current cell
-   - stop as soon as the first remaining key is settled/reached
-4. After the next key is discovered, separately run weighted Dijkstra
-   shortest-path search from the current cell to that key.
-5. After all keys are collected, run weighted Dijkstra shortest-path
-   search to the exit.
+3. During the SEARCH phase, keys are treated as unknown targets:
+   - run a weighted A*-style outward search from the current cell
+   - stop as soon as the first remaining key is popped/settled
+4. After a key is discovered, separately run weighted A* shortest-path search
+   from the current cell to that key.
+5. After all keys are collected, run weighted A* shortest-path search to exit.
 
 This keeps:
 - searching for which key to target next
 - routing to that discovered target
 as two separate stages.
 
-Recommended project structure:
-maze_runner/
-├── maze.json
-└── code/
-    ├── maze_generate.py
-    ├── maze_display.py
-    ├── maze_run.py
-    └── dijkstra.py
-
 Usage:
-    python dijkstra.py
-    python dijkstra.py --input ../maze.json
-    python dijkstra.py --output ../dijkstra_result.json
+    python astar.py
+    python astar.py --input ../maze.json
+    python astar.py --output ../astar_result.json
 """
 
 from __future__ import annotations
@@ -69,12 +66,12 @@ def default_input_path() -> Path:
 def default_output_path() -> Path:
     script_path = Path(__file__).resolve()
     root_dir = script_path.parent.parent
-    return root_dir / "dijkstra_result.json"
+    return root_dir / "astar_result.json"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Traverse the maze with weighted Dijkstra search and routing."
+        description="Traverse the maze with weighted A* search and routing."
     )
     parser.add_argument(
         "--input",
@@ -86,7 +83,7 @@ def parse_args() -> argparse.Namespace:
         "--output",
         type=str,
         default=None,
-        help="Optional output path. Default: maze_runner/dijkstra_result.json",
+        help="Optional output path. Default: maze_runner/astar_result.json",
     )
     return parser.parse_args()
 
@@ -163,36 +160,53 @@ def move_cost(cells: List[List[int]], to_cell: Coord) -> int:
     return cell_weight(rows, cols, r, c)
 
 
-def weighted_dijkstra_shortest_path(cells: List[List[int]], start: Coord, goal: Coord) -> List[Coord]:
+def manhattan(a: Coord, b: Coord) -> int:
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+def mirrored_reference(rows: int, cols: int, pos: Coord) -> Coord:
     """
-    Standard weighted Dijkstra shortest path.
-    The cost of a move is the weight of the destination cell.
-    Returns the full path from start to goal (inclusive).
+    Center-symmetric cell / opposite diagonal-like reference target.
+    """
+    r, c = pos
+    return (rows - 1 - r, cols - 1 - c)
+
+
+def weighted_astar_shortest_path(cells: List[List[int]], start: Coord, goal: Coord) -> List[Coord]:
+    """
+    Standard weighted A* shortest path.
+    g(n): accumulated weighted travel cost
+    h(n): Manhattan distance * 1 (admissible lower bound because minimum move cost is 1)
     """
     if start == goal:
         return [start]
 
-    pq: List[Tuple[int, Coord]] = [(0, start)]
-    dist: Dict[Coord, int] = {start: 0}
+    open_heap: List[Tuple[int, int, Coord]] = [(manhattan(start, goal), 0, start)]
+    g_cost: Dict[Coord, int] = {start: 0}
     parent: Dict[Coord, Optional[Coord]] = {start: None}
-    settled: Set[Coord] = set()
+    closed: Set[Coord] = set()
 
-    while pq:
-        cur_dist, cur = heapq.heappop(pq)
+    while open_heap:
+        _, g_cur, cur = heapq.heappop(open_heap)
 
-        if cur in settled:
+        if cur in closed:
             continue
-        settled.add(cur)
+        closed.add(cur)
 
         if cur == goal:
             break
 
         for nxt in get_open_neighbors(cells, cur):
-            new_dist = cur_dist + move_cost(cells, nxt)
-            if nxt not in dist or new_dist < dist[nxt]:
-                dist[nxt] = new_dist
+            tentative_g = g_cur + move_cost(cells, nxt)
+
+            if nxt in closed and tentative_g >= g_cost.get(nxt, float("inf")):
+                continue
+
+            if tentative_g < g_cost.get(nxt, float("inf")):
+                g_cost[nxt] = tentative_g
                 parent[nxt] = cur
-                heapq.heappush(pq, (new_dist, nxt))
+                f_nxt = tentative_g + manhattan(nxt, goal)
+                heapq.heappush(open_heap, (f_nxt, tentative_g, nxt))
 
     if goal not in parent:
         raise ValueError(f"No path found from {start} to {goal}.")
@@ -206,43 +220,55 @@ def weighted_dijkstra_shortest_path(cells: List[List[int]], start: Coord, goal: 
     return path
 
 
-def weighted_dijkstra_search_nearest_key(
+def weighted_astar_search_next_key(
     cells: List[List[int]],
     start: Coord,
     remaining_keys: Set[Coord],
 ) -> Coord:
     """
     SEARCH phase:
-    Run a weighted Dijkstra expansion from the current cell and stop as soon as
-    the first remaining key is settled/reached.
+    Run a weighted A*-style outward search from the current cell and stop
+    as soon as the first remaining key is popped/settled.
 
-    "Nearest" here means minimum accumulated WEIGHTED travel cost, not minimum
-    number of steps.
+    Search priority:
+    1. smaller accumulated weighted travel cost g
+    2. smaller Manhattan distance to the mirrored reference target
+       for directional bias
+    3. row/col tuple order naturally from heap tuple
+
+    This makes search influenced by BOTH:
+    - the weighted terrain
+    - the mirrored reference direction
     """
     if start in remaining_keys:
         return start
 
-    pq: List[Tuple[int, Coord]] = [(0, start)]
-    dist: Dict[Coord, int] = {start: 0}
-    settled: Set[Coord] = set()
+    rows, cols = len(cells), len(cells[0])
+    ref = mirrored_reference(rows, cols, start)
 
-    while pq:
-        cur_dist, cur = heapq.heappop(pq)
+    open_heap: List[Tuple[int, int, Coord]] = [(0, manhattan(start, ref), start)]
+    g_cost: Dict[Coord, int] = {start: 0}
+    closed: Set[Coord] = set()
 
-        if cur in settled:
+    while open_heap:
+        _, _, cur = heapq.heappop(open_heap)
+
+        if cur in closed:
             continue
-        settled.add(cur)
+        closed.add(cur)
 
         if cur in remaining_keys:
             return cur
 
+        g_cur = g_cost[cur]
         for nxt in get_open_neighbors(cells, cur):
-            new_dist = cur_dist + move_cost(cells, nxt)
-            if nxt not in dist or new_dist < dist[nxt]:
-                dist[nxt] = new_dist
-                heapq.heappush(pq, (new_dist, nxt))
+            tentative_g = g_cur + move_cost(cells, nxt)
+            if tentative_g < g_cost.get(nxt, float("inf")):
+                g_cost[nxt] = tentative_g
+                directional_bias = manhattan(nxt, ref)
+                heapq.heappush(open_heap, (tentative_g, directional_bias, nxt))
 
-    raise RuntimeError(f"Weighted Dijkstra search could not find any remaining key from {start}.")
+    raise RuntimeError(f"Weighted A* search could not find any remaining key from {start}.")
 
 
 def path_weight_cost(cells: List[List[int]], path: List[Coord]) -> int:
@@ -288,6 +314,7 @@ def compute_stats(cells: List[List[int]], path: List[Coord], key_set: Set[Coord]
     repeated_visit_ratio = repeated_visits / total_steps if total_steps > 0 else 0.0
     step_to_exit = total_steps if (path and path[-1] == exit_pos) else None
     weighted_cost_to_exit = total_weighted_cost if (path and path[-1] == exit_pos) else None
+    avg_weight_per_step = total_weighted_cost / total_steps if total_steps > 0 else 0.0
 
     return {
         "discovered_key_order": [[r, c] for r, c in discovered_keys],
@@ -304,18 +331,20 @@ def compute_stats(cells: List[List[int]], path: List[Coord], key_set: Set[Coord]
         "unique_cells_visited": len(visit_counts),
         "total_steps": total_steps,
         "total_weighted_cost": total_weighted_cost,
+        "avg_weight_per_step": avg_weight_per_step,
     }
 
 
-def run_dijkstra_agent(data: Dict[str, Any]) -> Dict[str, Any]:
+def run_astar_agent(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Weighted Dijkstra agent with separated search and routing phases.
+    Weighted A* agent with separated search and routing phases.
 
     Search phase:
-        weighted Dijkstra expansion until the first remaining key is reached
+        weighted A*-style outward search until the first remaining key is reached,
+        with directional bias toward the mirrored reference target
 
     Routing phase:
-        weighted Dijkstra shortest path to that discovered key
+        weighted A* shortest path to that discovered key
     """
     cells: List[List[int]] = data["cells"]
     start: Coord = tuple(data["start"])
@@ -327,25 +356,30 @@ def run_dijkstra_agent(data: Dict[str, Any]) -> Dict[str, Any]:
     current: Coord = start
 
     while remaining_keys:
-        discovered_key = weighted_dijkstra_search_nearest_key(cells, current, remaining_keys)
-        route_to_key = weighted_dijkstra_shortest_path(cells, current, discovered_key)
+        discovered_key = weighted_astar_search_next_key(cells, current, remaining_keys)
+        route_to_key = weighted_astar_shortest_path(cells, current, discovered_key)
 
         full_path.extend(route_to_key[1:])
         current = discovered_key
         remaining_keys.remove(discovered_key)
 
-    exit_route = weighted_dijkstra_shortest_path(cells, current, exit_pos)
+    exit_route = weighted_astar_shortest_path(cells, current, exit_pos)
     full_path.extend(exit_route[1:])
+
+    rows, cols = len(cells), len(cells[0])
+    reference_target = mirrored_reference(rows, cols, start)
 
     stats = compute_stats(cells, full_path, set(key_list), exit_pos)
 
     return {
-        "algorithm": "dijkstra_weighted",
+        "algorithm": "astar_weighted",
         "path": [[r, c] for r, c in full_path],
         "exit": list(exit_pos),
         "actual_keys": [[r, c] for r, c in key_list],
         "success": full_path[-1] == exit_pos,
         "weight_rule": "outer ring = 1, each deeper ring +1, move cost = destination cell weight",
+        "search_reference_rule": "each key-search phase uses current position's center-symmetric cell as directional reference",
+        "initial_reference_target": [reference_target[0], reference_target[1]],
         **stats,
     }
 
@@ -357,7 +391,7 @@ def save_result(result: Dict[str, Any], output_path: Path) -> None:
 
 
 def print_summary(result: Dict[str, Any], output_path: Path) -> None:
-    print("Weighted Dijkstra traversal finished.")
+    print("Weighted A* traversal finished.")
     print(f"Success: {result['success']}")
     print(f"Start: {tuple(result['path'][0])}")
     print(f"Exit: {tuple(result['exit'])}")
@@ -373,9 +407,11 @@ def print_summary(result: Dict[str, Any], output_path: Path) -> None:
     print(f"Weighted cost to exit: {result['weighted_cost_to_exit']}")
     print(f"Total steps: {result['total_steps']}")
     print(f"Total weighted cost: {result['total_weighted_cost']}")
+    print(f"Avg weight per step: {result['avg_weight_per_step']:.4f}")
     print(f"Unique cells visited: {result['unique_cells_visited']}")
     print(f"Repeated visits: {result['repeated_visits']}")
     print(f"Repeated visit ratio: {result['repeated_visit_ratio']:.4f}")
+    print(f"Initial mirrored reference target: {tuple(result['initial_reference_target'])}")
     print(f"Result saved to: {output_path}")
 
 
@@ -387,7 +423,7 @@ def main() -> None:
     data = load_maze(input_path)
     validate_maze(data)
 
-    result = run_dijkstra_agent(data)
+    result = run_astar_agent(data)
     save_result(result, output_path)
     print_summary(result, output_path)
 

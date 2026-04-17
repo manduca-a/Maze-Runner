@@ -2,6 +2,8 @@
 """
 dfs.py
 
+Author: Yanzhe Xi
+
 DFS maze solver for the CS5800 final project.
 
 Task:

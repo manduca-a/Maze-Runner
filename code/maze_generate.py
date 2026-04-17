@@ -2,6 +2,8 @@
 """
 maze_generate.py
 
+Author: Qizhen Dong
+
 Generate a grid maze and save it as maze.json in the maze_runner root directory.
 
 Recommended project structure:
@@ -15,6 +17,7 @@ Usage examples:
     python maze_generate.py --rows 5 --cols 5 --seed 42
     python maze_generate.py --rows 50 --cols 50 --keys 3
     python maze_generate.py --rows 100 --cols 100 --output ../maze.json
+    python maze_generate.py --rows 50 --cols 50 --loop-rate 0.08
 """
 
 from __future__ import annotations
@@ -105,6 +108,38 @@ def generate_perfect_maze(rows: int, cols: int, rng: random.Random) -> List[List
     return grid
 
 
+def add_loops(grid: List[List[int]], rng: random.Random, loop_rate: float) -> None:
+    """
+    Randomly remove a small portion of remaining walls after generating a perfect maze.
+    This introduces cycles so the maze is no longer path-unique.
+
+    loop_rate is the fraction of candidate interior walls to open, usually 0.05~0.10.
+    """
+    if loop_rate <= 0:
+        return
+
+    rows, cols = len(grid), len(grid[0])
+    candidate_walls = []
+
+    for r in range(rows):
+        for c in range(cols):
+            if c + 1 < cols and (grid[r][c] & RIGHT) != 0:
+                candidate_walls.append(((r, c), (r, c + 1)))
+            if r + 1 < rows and (grid[r][c] & DOWN) != 0:
+                candidate_walls.append(((r, c), (r + 1, c)))
+
+    if not candidate_walls:
+        return
+
+    rng.shuffle(candidate_walls)
+    open_count = max(1, int(len(candidate_walls) * loop_rate))
+    open_count = min(open_count, len(candidate_walls))
+
+    for a, b in candidate_walls[:open_count]:
+        carve_passage(grid, a, b)
+
+
+
 def get_open_neighbors(grid: List[List[int]], pos: Coord) -> List[Coord]:
     rows, cols = len(grid), len(grid[0])
     r, c = pos
@@ -160,8 +195,11 @@ def choose_keys(
     rng: random.Random,
 ) -> List[Coord]:
     """
-    Choose key positions from reachable cells, excluding start/exit.
-    Uses a distance-aware heuristic to keep keys reasonably spread out.
+    Choose key positions uniformly at random from all maze cells,
+    excluding only start and exit.
+
+    This intentionally removes the previous distance-based heuristic so
+    keys can appear anywhere in the maze, including near the center.
     """
     rows, cols = len(grid), len(grid[0])
     all_cells = [(r, c) for r in range(rows) for c in range(cols)]
@@ -170,50 +208,7 @@ def choose_keys(
     if len(candidates) < key_count:
         raise ValueError("Not enough cells to place all keys.")
 
-    dist_from_start = bfs_distances(grid, start)
-    dist_from_exit = bfs_distances(grid, exit_pos)
-
-    # Prefer cells that are not too close to start/exit.
-    candidates.sort(
-        key=lambda cell: (
-            dist_from_start[cell[0]][cell[1]] + dist_from_exit[cell[0]][cell[1]],
-            dist_from_start[cell[0]][cell[1]],
-        ),
-        reverse=True,
-    )
-
-    # Take a larger candidate pool, then greedily spread keys out.
-    pool_size = max(key_count * 6, min(len(candidates), 30))
-    pool = candidates[:pool_size]
-    rng.shuffle(pool)
-
-    selected: List[Coord] = []
-
-    while pool and len(selected) < key_count:
-        if not selected:
-            selected.append(pool.pop())
-            continue
-
-        best_cell = None
-        best_score = -1
-
-        for cell in pool:
-            min_sep = min(manhattan(cell, chosen) for chosen in selected)
-            score = min_sep + dist_from_start[cell[0]][cell[1]] // 2
-            if score > best_score:
-                best_score = score
-                best_cell = cell
-
-        selected.append(best_cell)
-        pool.remove(best_cell)
-
-    # Fallback in extremely small mazes.
-    if len(selected) < key_count:
-        remaining = [c for c in candidates if c not in selected]
-        rng.shuffle(remaining)
-        selected.extend(remaining[: key_count - len(selected)])
-
-    return selected
+    return rng.sample(candidates, key_count)
 
 
 def manhattan(a: Coord, b: Coord) -> int:
@@ -259,10 +254,12 @@ def build_maze_data(
     key_count: int,
     seed: int | None,
     generator_name: str = "dfs_backtracking",
+    loop_rate: float = 0.08,
 ) -> dict:
     rng = random.Random(seed)
 
     grid = generate_perfect_maze(rows, cols, rng)
+    add_loops(grid, rng, loop_rate)
     start, exit_pos = choose_start_exit(grid)
     keys = choose_keys(grid, start, exit_pos, key_count, rng)
 
@@ -275,6 +272,7 @@ def build_maze_data(
             "generator": generator_name,
             "seed": seed,
             "key_count": key_count,
+            "loop_rate": loop_rate,
             "wall_encoding": {
                 "UP": UP,
                 "RIGHT": RIGHT,
@@ -287,6 +285,7 @@ def build_maze_data(
         "keys": [[r, c] for r, c in keys],
         "cells": grid,
     }
+
 
 
 def default_output_path() -> Path:
@@ -306,6 +305,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--keys", type=int, default=3, help="Number of keys to place.")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducible maze generation.")
     parser.add_argument(
+        "--loop-rate",
+        type=float,
+        default=0.08,
+        help="Fraction of candidate walls to open after maze generation. Recommended: 0.05~0.10.",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default=None,
@@ -323,12 +328,15 @@ def main() -> None:
         raise ValueError("keys must be a non-negative integer.")
     if args.keys > args.rows * args.cols - 2:
         raise ValueError("Too many keys for the maze size.")
+    if not 0 <= args.loop_rate <= 1:
+        raise ValueError("loop_rate must be between 0 and 1.")
 
     maze_data = build_maze_data(
         rows=args.rows,
         cols=args.cols,
         key_count=args.keys,
         seed=args.seed,
+        loop_rate=args.loop_rate,
     )
 
     output_path = Path(args.output).resolve() if args.output else default_output_path()
@@ -342,6 +350,7 @@ def main() -> None:
     print(f"Start: {tuple(maze_data['start'])}")
     print(f"Exit: {tuple(maze_data['exit'])}")
     print(f"Keys: {[tuple(k) for k in maze_data['keys']]}")
+    print(f"Loop rate: {maze_data['meta']['loop_rate']}")
     print("Wall encoding: UP=1, RIGHT=2, DOWN=4, LEFT=8")
 
 

@@ -1,257 +1,158 @@
-# CS5800 Final Project: Maze Runner
+# Maze Runner Project
 
-This project is a maze-based algorithm comparison framework for the CS5800 final project.
+## Overview
 
-The maze is a 2D grid with walls between neighboring cells.  
-An agent starts from the entrance, must collect 3 hidden keys, and then reach the exit.
+This project implements and compares multiple classical search algorithms in a grid-based maze environment. The maze includes:
 
-At the current stage, this repository includes:
+* A start position
+* An exit
+* Three keys that must be collected before reaching the exit
 
-- `maze_generate.py`: generate a maze and save it as `maze.json`
-- `maze_display.py`: read `maze.json` and render the maze with pygame
+The project supports both **unweighted** and **weighted** maze traversal, enabling analysis of algorithm behavior under different cost structures.
 
 ---
 
-## Project Structure
+## Algorithms
 
-```text
+### Unweighted Search
+
+* **BFS (Breadth-First Search)**
+  Author: Yanzhe Xi
+
+* **DFS (Depth-First Search)**
+  Author: Yanzhe Xi
+
+### Weighted Search
+
+* **Dijkstra**
+  Author: Qizhen Dong
+
+* **A***
+  Author: Qizhen Dong
+
+---
+
+## Maze Design
+
+### Structure
+
+* Grid-based maze
+* Walls represented using bit encoding
+* Fully connected (every cell reachable)
+
+### Key Placement
+
+* Keys are randomly generated
+* Positions are uniformly sampled from all valid cells
+* Start and exit positions are excluded
+
+### Weight Rules (for weighted algorithms)
+
+* Outer ring weight = 1
+* Each inner layer increases weight by +1
+* Movement cost = weight of destination cell
+
+---
+
+## Task Definition
+
+All agents follow the same task pipeline:
+
+1. Start from the entrance
+2. Search for keys (unknown positions)
+3. Collect all keys
+4. Navigate to the exit
+
+Search and routing are separated into two phases:
+
+* **Search phase**: find next key
+* **Routing phase**: compute shortest path to that key
+
+---
+
+## File Structure
+
+```
 maze_runner/
 ├── maze.json
+├── astar_result.json
+├── dijkstra_result.json
 ├── README.md
 ├── requirements.txt
+├── .gitignore
 └── code/
     ├── maze_generate.py
-    └── maze_display.py
-```
-
-- `maze.json` is stored in the project root.
-- Python scripts are stored in `code/`.
-
----
-
-## Environment Setup
-
-It is recommended to create a virtual environment first.
-
-### Option 1: using conda
-
-```bash
-conda create -n maze python=3.10 -y
-conda activate maze
-pip install -r requirements.txt
-```
-
-### Option 2: using venv
-
-```bash
-python -m venv venv
-```
-
-Activate the environment:
-
-#### On Windows PowerShell
-```bash
-venv\Scripts\Activate.ps1
-```
-
-#### On Windows CMD
-```bash
-venv\Scripts\activate
-```
-
-#### On macOS / Linux
-```bash
-source venv/bin/activate
-```
-
-Then install dependencies:
-
-```bash
-pip install -r requirements.txt
+    ├── maze_display.py
+    ├── maze_run.py
+    ├── bfs.py
+    ├── dfs.py
+    ├── dijkstra.py
+    └── astar.py
 ```
 
 ---
 
-## 1. Generate a Maze
+## Usage
 
-Go to the `code` directory:
+### Generate Maze
 
-```bash
-cd code
+```
+python code/maze_generate.py
+python code/maze_generate.py --rows 20 --cols 20 --seed 42 --loop-rate 0.1
+python code/maze_display.py
 ```
 
-Run the generator:
+### Run Algorithms
 
-```bash
-python maze_generate.py
+```
+python code/bfs.py
+python code/dfs.py
+python code/dijkstra.py
+python code/astar.py
 ```
 
-This will generate a default `5 x 5` maze and save it to:
+### Visualize & Compare
 
-```text
-../maze.json
 ```
-
-That means the output file will appear in the project root as `maze.json`.
-
-### Example: generate a larger maze
-
-```bash
-python maze_generate.py --rows 10 --cols 10 --seed 42
-```
-
-### Example: generate a 50 x 50 maze
-
-```bash
-python maze_generate.py --rows 50 --cols 50 --seed 42
-```
-
-### Optional arguments
-
-- `--rows`: number of rows
-- `--cols`: number of columns
-- `--keys`: number of keys
-- `--seed`: random seed for reproducibility
-- `--output`: optional custom output path
-
-Example:
-
-```bash
-python maze_generate.py --rows 20 --cols 20 --keys 3 --seed 123 --output ../maze.json
+python code/maze_run.py
 ```
 
 ---
 
-## 2. Display the Maze
+## Output Metrics
 
-After `maze.json` has been generated, run:
+Each algorithm produces:
 
-```bash
-python maze_display.py
-```
-
-This reads `../maze.json` by default and opens a pygame window.
-
-### Optional input path
-
-```bash
-python maze_display.py --input ../maze.json
-```
-
-### Optional window size
-
-```bash
-python maze_display.py --width 1400 --height 1000
-```
+* Path taken
+* Total steps
+* Total weighted cost
+* Key discovery order
+* Repeated visits
+* Average cost per step
 
 ---
 
-## 3. Controls in the Pygame Viewer
+## Key Observations
 
-Inside the pygame window:
+* BFS minimizes steps, not cost
+* Dijkstra guarantees optimal cost
+* A* introduces directional bias and heuristic guidance
+* DFS is not optimal but useful as a baseline
 
-- Mouse wheel: zoom in / out
-- `+` or `-`: zoom in / out
-- Left mouse drag: pan
-- Arrow keys: pan
-- `R`: reset the view to fit the maze
-- `G`: toggle helper grid
-- `ESC`: quit
-
-### Symbols
-
-- `I`: entrance
-- `O`: exit
-- `K`: key
+When loops are introduced into the maze, algorithm differences become significantly more visible.
 
 ---
 
-## 4. Maze JSON Format
+## Notes
 
-The generated `maze.json` follows this structure:
-
-```json
-{
-  "meta": {
-    "rows": 5,
-    "cols": 5,
-    "generator": "dfs_backtracking",
-    "seed": 42,
-    "key_count": 3,
-    "wall_encoding": {
-      "UP": 1,
-      "RIGHT": 2,
-      "DOWN": 4,
-      "LEFT": 8
-    }
-  },
-  "start": [4, 0],
-  "exit": [0, 4],
-  "keys": [[1, 0], [2, 4], [3, 1]],
-  "cells": [
-    [9, 1, 1, 1, 3],
-    [8, 0, 1, 1, 2],
-    [8, 1, 2, 1, 2],
-    [8, 0, 4, 0, 2],
-    [12, 5, 5, 5, 6]
-  ]
-}
-```
-
-### Important notes
-
-- `start` and `exit` are known positions
-- `keys` are stored in the file, but future agent code does not have to expose them directly
-- `cells[r][c]` stores the wall bitmask for each cell
-
-Wall encoding:
-
-- `UP = 1`
-- `RIGHT = 2`
-- `DOWN = 4`
-- `LEFT = 8`
-
-A direction is blocked if the corresponding bit is present.
+* Weighted and unweighted behaviors are intentionally separated
+* Maze generation supports randomness via seed
+* Visualization highlights traversal differences clearly
 
 ---
 
-## 5. Recommended Workflow
+## Authors
 
-From the project root:
-
-```bash
-cd code
-python maze_generate.py --rows 10 --cols 10 --seed 42
-python maze_display.py
-```
-
-This is the standard workflow for testing.
-
----
-
-## 6. Notes for Teammates
-
-- Always keep `maze_generate.py` and `maze_display.py` inside `code/`
-- Always keep `maze.json` in the project root unless you intentionally change the path
-- If pygame is missing, install dependencies again with:
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## 7. Current Status
-
-Currently completed:
-
-- Maze generation
-- Maze JSON export
-- Pygame maze visualization
-
-Planned next steps:
-
-- Maze environment interface
-- Agent algorithms
-- Path animation
-- Performance statistics and comparison charts
+* BFS / DFS: Yanzhe Xi
+* Dijkstra / A*: Qizhen Dong
+* System Design & Integration: Qizhen Dong

@@ -2,6 +2,8 @@
 """
 bfs.py
 
+Author: Yanzhe Xi
+
 BFS maze solver for the CS5800 final project.
 
 Task:

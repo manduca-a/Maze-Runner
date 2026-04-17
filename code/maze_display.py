@@ -2,7 +2,18 @@
 """
 maze_display.py
 
+Author: Qizhen Dong
+
 Render maze.json with pygame so the user can view the maze clearly in a window.
+
+This version adds:
+1. Grid weight visualization by grayscale depth:
+   - outer ring weight = 1 and shown as white
+   - each deeper ring adds +1 weight
+   - the center keeps a neutral gray
+2. Adaptive window sizing:
+   - by default the window opens near screen-maximized size
+   - width / height arguments still work if explicitly provided
 
 Recommended project structure:
 maze_runner/
@@ -14,6 +25,7 @@ maze_runner/
 Usage:
     python maze_display.py
     python maze_display.py --input ../maze.json
+    python maze_display.py --width 1400 --height 900
 
 Controls:
     Mouse wheel / +/- : zoom in or out
@@ -29,7 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pygame
 
@@ -41,9 +53,7 @@ LEFT = 8
 
 Coord = Tuple[int, int]
 
-
 BACKGROUND_COLOR = (245, 245, 245)
-CELL_COLOR = (255, 255, 255)
 WALL_COLOR = (20, 20, 20)
 GRID_COLOR = (220, 220, 220)
 TEXT_COLOR = (20, 20, 20)
@@ -56,7 +66,10 @@ DEFAULT_WINDOW_WIDTH = 1200
 DEFAULT_WINDOW_HEIGHT = 900
 MIN_CELL_SIZE = 4.0
 MAX_CELL_SIZE = 120.0
-HUD_HEIGHT = 70
+HUD_HEIGHT = 82
+
+OUTER_RING_GRAY = 255
+CENTER_RING_GRAY = 100
 
 
 def default_input_path() -> Path:
@@ -76,8 +89,18 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional input path. Default: maze_runner/maze.json",
     )
-    parser.add_argument("--width", type=int, default=DEFAULT_WINDOW_WIDTH, help="Window width.")
-    parser.add_argument("--height", type=int, default=DEFAULT_WINDOW_HEIGHT, help="Window height.")
+    parser.add_argument(
+        "--width",
+        type=int,
+        default=None,
+        help="Optional window width. If omitted, uses an adaptive near-maximized width.",
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=None,
+        help="Optional window height. If omitted, uses an adaptive near-maximized height.",
+    )
     return parser.parse_args()
 
 
@@ -117,8 +140,42 @@ def validate_maze(data: Dict) -> None:
         raise ValueError("Start, exit, and keys must all be in distinct cells.")
 
 
+def cell_weight(rows: int, cols: int, r: int, c: int) -> int:
+    """
+    Outer ring has weight 1.
+    Each deeper ring increases weight by 1.
+    """
+    depth = min(r, c, rows - 1 - r, cols - 1 - c)
+    return depth + 1
+
+
+def max_weight(rows: int, cols: int) -> int:
+    return min(rows, cols) // 2 + (1 if min(rows, cols) % 2 == 1 else 0)
+
+
+def weight_to_gray(weight: int, max_w: int) -> Tuple[int, int, int]:
+    """
+    Map weight to grayscale:
+    - outer ring -> white
+    - center -> neutral gray
+    """
+    if max_w <= 1:
+        value = OUTER_RING_GRAY
+    else:
+        ratio = (weight - 1) / (max_w - 1)
+        value = int(round(OUTER_RING_GRAY + ratio * (CENTER_RING_GRAY - OUTER_RING_GRAY)))
+    value = max(0, min(255, value))
+    return (value, value, value)
+
+
 class MazeViewer:
-    def __init__(self, maze_data: Dict, source_path: Path, window_width: int, window_height: int) -> None:
+    def __init__(
+        self,
+        maze_data: Dict,
+        source_path: Path,
+        window_width: Optional[int],
+        window_height: Optional[int],
+    ) -> None:
         self.data = maze_data
         self.source_path = source_path
 
@@ -128,12 +185,18 @@ class MazeViewer:
         self.start: Coord = tuple(self.data["start"])
         self.exit: Coord = tuple(self.data["exit"])
         self.keys: List[Coord] = [tuple(k) for k in self.data["keys"]]
-
-        self.window_width = max(600, window_width)
-        self.window_height = max(500, window_height)
+        self.max_w = max_weight(self.rows, self.cols)
 
         pygame.init()
         pygame.display.set_caption("Maze Viewer")
+
+        display_info = pygame.display.Info()
+        adaptive_width = max(900, display_info.current_w - 80)
+        adaptive_height = max(700, display_info.current_h - 120)
+
+        self.window_width = max(600, window_width if window_width is not None else adaptive_width)
+        self.window_height = max(500, window_height if window_height is not None else adaptive_height)
+
         self.screen = pygame.display.set_mode((self.window_width, self.window_height), pygame.RESIZABLE)
         self.clock = pygame.time.Clock()
 
@@ -195,7 +258,14 @@ class MazeViewer:
             int(round(self.rows * self.cell_size)),
         )
 
-        pygame.draw.rect(self.screen, CELL_COLOR, maze_rect)
+        pygame.draw.rect(self.screen, (255, 255, 255), maze_rect)
+
+        for r in range(self.rows):
+            for c in range(self.cols):
+                rect = self.cell_rect(r, c)
+                weight = cell_weight(self.rows, self.cols, r, c)
+                fill_color = weight_to_gray(weight, self.max_w)
+                pygame.draw.rect(self.screen, fill_color, rect)
 
         if self.show_grid and self.cell_size >= 10:
             for c in range(self.cols + 1):
@@ -223,9 +293,17 @@ class MazeViewer:
                 center = rect.center
 
                 if (r, c) == self.start:
-                    pygame.draw.rect(self.screen, START_COLOR, rect.inflate(-max(2, rect.width // 6), -max(2, rect.height // 6)))
+                    pygame.draw.rect(
+                        self.screen,
+                        START_COLOR,
+                        rect.inflate(-max(2, rect.width // 6), -max(2, rect.height // 6)),
+                    )
                 elif (r, c) == self.exit:
-                    pygame.draw.rect(self.screen, EXIT_COLOR, rect.inflate(-max(2, rect.width // 6), -max(2, rect.height // 6)))
+                    pygame.draw.rect(
+                        self.screen,
+                        EXIT_COLOR,
+                        rect.inflate(-max(2, rect.width // 6), -max(2, rect.height // 6)),
+                    )
                 elif (r, c) in self.keys:
                     radius = max(3, int(self.cell_size * 0.22))
                     pygame.draw.circle(self.screen, KEY_COLOR, center, radius)
@@ -273,7 +351,13 @@ class MazeViewer:
         hud_surface = pygame.Surface((self.screen.get_width(), HUD_HEIGHT), pygame.SRCALPHA)
         hud_surface.fill(HUD_BG)
         self.screen.blit(hud_surface, (0, 0))
-        pygame.draw.line(self.screen, (180, 180, 180), (0, HUD_HEIGHT - 1), (self.screen.get_width(), HUD_HEIGHT - 1), 1)
+        pygame.draw.line(
+            self.screen,
+            (180, 180, 180),
+            (0, HUD_HEIGHT - 1),
+            (self.screen.get_width(), HUD_HEIGHT - 1),
+            1,
+        )
 
         generator = self.data["meta"].get("generator", "unknown")
         seed = self.data["meta"].get("seed", None)
@@ -281,11 +365,13 @@ class MazeViewer:
         title = f"Maze Viewer   {self.rows}x{self.cols}   Generator: {generator}   Seed: {seed}"
         controls = "Zoom: mouse wheel / +/-   Pan: drag or arrow keys   R: reset   G: grid toggle   ESC: quit"
         points = f"I = entrance {self.start}    O = exit {self.exit}    K = keys {self.keys}"
+        weights = f"Weight rings: outer = 1 (white), deeper rings increase by +1, center = neutral gray ({self.max_w} max)"
 
         self.screen.blit(self.big_font.render(title, True, TEXT_COLOR), (12, 8))
         self.screen.blit(self.small_font.render(points, True, TEXT_COLOR), (12, 35))
+        self.screen.blit(self.small_font.render(weights, True, TEXT_COLOR), (12, 54))
         controls_surf = self.small_font.render(controls, True, TEXT_COLOR)
-        self.screen.blit(controls_surf, (12, 52))
+        self.screen.blit(controls_surf, (12, 72))
 
     def handle_keydown(self, event: pygame.event.Event) -> None:
         pan_step = max(20, int(self.cell_size * 0.8))
@@ -320,6 +406,7 @@ class MazeViewer:
 
                 if event.type == pygame.VIDEORESIZE:
                     self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
+                    self.reset_view()
 
                 elif event.type == pygame.KEYDOWN:
                     self.handle_keydown(event)
