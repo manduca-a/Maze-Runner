@@ -4,23 +4,23 @@ dfs.py
 
 DFS maze solver for the CS5800 final project.
 
-Strategy (DFS):
-  Same phase structure as bfs.py — collect keys one by one (nearest by BFS
-  distance, because DFS path-length is not meaningful for "nearest"), then
-  reach the exit — but the path within each phase is produced by an iterative
-  DFS that records the actual traversal order (including backtracking steps),
-  so the path faithfully represents what DFS *visits*, not just the solution.
+Task:
+    Start at maze["start"], collect ALL keys (positions unknown to agent
+    until stepped on), then reach maze["exit"].
 
-  This gives DFS higher repeated_visits and longer total_steps than BFS on
-  the same maze, which is the expected and interesting comparison result.
+Strategy:
+    Phase-based DFS.  At each phase the agent does NOT know where the
+    remaining keys are — it runs a full iterative DFS from its current
+    position and stops as soon as it first steps on an undiscovered key.
+    The path returned is the COMPLETE DFS traversal trace, including
+    every backtracking move, faithfully representing what DFS visits.
 
-Why "nearest key" for phase ordering?
-  DFS doesn't optimise distance, so the order in which keys are targeted
-  doesn't affect the DFS path quality — using nearest-by-BFS keeps the
-  comparison fair (same key-collection order as bfs.py) so that differences
-  in the statistics come purely from the traversal strategy.
+    After all keys are found a final DFS phase navigates to the exit.
 
-Return value: same schema as bfs.py (compatible with maze_run.py).
+Path recorded:
+    Every cell push AND every backtrack step is appended to the trace,
+    so repeated_visits and repeated_visit_ratio will be noticeably higher
+    than BFS — this is the expected and educationally interesting result.
 """
 
 from __future__ import annotations
@@ -36,107 +36,103 @@ LEFT  = 8
 Coord = Tuple[int, int]
 
 
-# ── low-level helpers (identical to bfs.py) ────────────────────────────────────
-
 def _open_neighbors(cells: List[List[int]], pos: Coord) -> List[Coord]:
+    """Return all grid neighbors reachable from pos (no wall between them)."""
     rows, cols = len(cells), len(cells[0])
     r, c = pos
     result: List[Coord] = []
-
     if r > 0        and not (cells[r][c] & UP):    result.append((r - 1, c))
     if c < cols - 1 and not (cells[r][c] & RIGHT): result.append((r, c + 1))
     if r < rows - 1 and not (cells[r][c] & DOWN):  result.append((r + 1, c))
     if c > 0        and not (cells[r][c] & LEFT):  result.append((r, c - 1))
-
     return result
 
 
 def _bfs_distance(cells: List[List[int]], src: Coord, dst: Coord) -> int:
-    """Return BFS shortest-path length (number of steps), or -1 if unreachable."""
+    """BFS shortest distance (steps), or -1 if unreachable."""
     if src == dst:
         return 0
     visited: Set[Coord] = {src}
     queue: deque[Tuple[Coord, int]] = deque([(src, 0)])
     while queue:
-        cur, dist = queue.popleft()
+        cur, d = queue.popleft()
         for nb in _open_neighbors(cells, cur):
             if nb == dst:
-                return dist + 1
+                return d + 1
             if nb not in visited:
                 visited.add(nb)
-                queue.append((nb, dist + 1))
+                queue.append((nb, d + 1))
     return -1
 
 
-# ── DFS traversal (with full backtracking trace) ───────────────────────────────
-
-def _dfs_path_with_trace(
+def _dfs_trace_to_nearest(
     cells: List[List[int]],
     src: Coord,
-    dst: Coord,
+    targets: Set[Coord],
 ) -> Optional[List[Coord]]:
     """
-    Iterative DFS from *src* to *dst*.
+    Iterative DFS from src.  Stop as soon as ANY cell in *targets* is
+    first reached.
 
-    Returns the *full traversal trace* — every cell push and every backtrack
-    step is recorded — so the returned list accurately reflects what DFS
-    visits, including backtracking.  The list starts at src and ends at dst.
+    Returns the FULL traversal trace — every forward step and every
+    backtrack move is recorded — so the path length reflects true DFS
+    behaviour, not just the solution length.
 
-    Returns None if dst is unreachable.
+    Returns None if no target is reachable.
     """
-    if src == dst:
+    if src in targets:
         return [src]
 
-    # Stack entries: (position, index-of-next-neighbor-to-try)
-    # We store the neighbor list alongside so we can resume from where we left off.
-    neighbor_cache: Dict[Coord, List[Coord]] = {}
+    nb_cache: Dict[Coord, List[Coord]] = {}
 
     def neighbors(pos: Coord) -> List[Coord]:
-        if pos not in neighbor_cache:
-            neighbor_cache[pos] = _open_neighbors(cells, pos)
-        return neighbor_cache[pos]
+        if pos not in nb_cache:
+            nb_cache[pos] = _open_neighbors(cells, pos)
+        return nb_cache[pos]
 
-    # DFS stack: list of (coord, iterator-index)
     stack: List[Tuple[Coord, int]] = [(src, 0)]
     visited: Set[Coord] = {src}
-
-    # Full trace (every push and pop recorded as a sequence of positions)
     trace: List[Coord] = [src]
 
     while stack:
         cur, nb_idx = stack[-1]
-
-        # Find next unvisited neighbor
         nb_list = neighbors(cur)
-        found = False
+        found_next = False
+
         while nb_idx < len(nb_list):
             nb = nb_list[nb_idx]
             nb_idx += 1
             if nb not in visited:
-                # Update the iterator index on the current frame
+                # update iterator index for current frame
                 stack[-1] = (cur, nb_idx)
-
                 visited.add(nb)
                 stack.append((nb, 0))
                 trace.append(nb)
 
-                if nb == dst:
-                    return trace
+                if nb in targets:
+                    return trace  
 
-                found = True
+                found_next = True
                 break
 
-        if not found:
-            # Backtrack: pop current cell and record the step back to parent
+        if not found_next:
             stack.pop()
             if stack:
                 parent_pos = stack[-1][0]
-                trace.append(parent_pos)   # ← backtrack move recorded in trace
+                trace.append(parent_pos)
 
-    return None  # dst unreachable
+    return None
 
 
-# ── statistics helper (identical to bfs.py) ───────────────────────────────────
+def _dfs_trace_to_target(
+    cells: List[List[int]],
+    src: Coord,
+    dst: Coord,
+) -> Optional[List[Coord]]:
+    """DFS trace to a single destination cell."""
+    return _dfs_trace_to_nearest(cells, src, {dst})
+
+
 
 def _compute_stats(
     path: List[Coord],
@@ -146,7 +142,7 @@ def _compute_stats(
     visit_counts: Dict[Coord, int] = {}
     seen_keys: List[Coord] = []
     discovered: Set[Coord] = set()
-    step_keys = [None, None, None]
+    step_keys: List[Optional[int]] = [None, None, None]
 
     for step, pos in enumerate(path):
         visit_counts[pos] = visit_counts.get(pos, 0) + 1
@@ -157,10 +153,10 @@ def _compute_stats(
             if idx < 3:
                 step_keys[idx] = step
 
-    total_steps = max(0, len(path) - 1)
-    repeated    = sum(v - 1 for v in visit_counts.values() if v > 1)
-    ratio       = repeated / total_steps if total_steps > 0 else 0.0
-    step_exit   = total_steps if (path and path[-1] == exit_pos) else None
+    total    = max(0, len(path) - 1)
+    repeated = sum(v - 1 for v in visit_counts.values() if v > 1)
+    ratio    = repeated / total if total > 0 else 0.0
+    step_exit = total if (path and path[-1] == exit_pos) else None
 
     return {
         "discovered_key_order":  [[r, c] for r, c in seen_keys],
@@ -171,47 +167,54 @@ def _compute_stats(
         "repeated_visits":       repeated,
         "repeated_visit_ratio":  round(ratio, 6),
         "unique_cells_visited":  len(visit_counts),
-        "total_steps":           total_steps,
+        "total_steps":           total,
     }
 
 
-# ── main agent entry point ─────────────────────────────────────────────────────
 
 def run_dfs_agent(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    DFS agent: collect all keys (nearest-first ordering), then reach exit.
-    Each sub-path is produced by DFS with full backtracking trace.
+    DFS agent.
+
+    The agent does NOT receive key positions in advance.  Each phase it
+    runs DFS from its current cell and heads toward the FIRST key it
+    encounters during depth-first expansion.  The full backtracking
+    trace is recorded so statistics reflect true DFS behaviour.
+
+    Key collection order is determined by DFS discovery order (whichever
+    key DFS happens to reach first from the current position), making it
+    genuinely different from BFS's nearest-first ordering.
     """
     cells: List[List[int]] = data["cells"]
     start: Coord           = tuple(data["start"])
     exit_pos: Coord        = tuple(data["exit"])
     key_list: List[Coord]  = [tuple(k) for k in data["keys"]]
 
-    remaining_keys: List[Coord] = list(key_list)
-    full_path: List[Coord]      = [start]
-    current: Coord              = start
+    remaining: Set[Coord]   = set(key_list)
+    full_path: List[Coord]  = [start]
+    current: Coord          = start
 
-    # ── Phase 1 : collect every key ───────────────────────────────────────────
-    while remaining_keys:
-        # Nearest key by BFS distance (keeps phase order comparable to BFS)
-        nearest     = min(remaining_keys, key=lambda k: _bfs_distance(cells, current, k))
-        sub_path    = _dfs_path_with_trace(cells, current, nearest)
+    while remaining:
+        sub = _dfs_trace_to_nearest(cells, current, remaining)
+        if sub is None:
+            raise RuntimeError(
+                f"DFS: no reachable key from {current}. "
+                "Check maze connectivity."
+            )
+        # sub[0] == current, skip to avoid duplicate
+        full_path.extend(sub[1:])
+        found_key = sub[-1]
+        remaining.remove(found_key)
+        current = found_key
 
-        if sub_path is None:
-            raise RuntimeError(f"DFS: unreachable key {nearest} from {current}.")
-
-        full_path.extend(sub_path[1:])   # skip first cell (already recorded)
-        current = nearest
-        remaining_keys.remove(nearest)
-
-    # ── Phase 2 : reach the exit ───────────────────────────────────────────────
-    exit_sub = _dfs_path_with_trace(cells, current, exit_pos)
+    exit_sub = _dfs_trace_to_target(cells, current, exit_pos)
     if exit_sub is None:
-        raise RuntimeError(f"DFS: exit unreachable from {current}.")
-
+        raise RuntimeError(
+            f"DFS: exit unreachable from {current}. "
+            "Check maze connectivity."
+        )
     full_path.extend(exit_sub[1:])
 
-    # ── Build result ───────────────────────────────────────────────────────────
     stats = _compute_stats(full_path, set(key_list), exit_pos)
 
     return {
