@@ -49,19 +49,19 @@ LEFT = 8
 
 Coord = Tuple[int, int]
 
-ALGO_ORDER = ["bfs", "dfs", "dijkstra", "astar"]
+ALGO_ORDER = ["bfs_optimal", "bfs_greedy", "dfs", "astar"]
 
 ALGO_DISPLAY_NAME = {
-    "bfs": "BFS",
+    "bfs_optimal": "BFS (Optimal)",
+    "bfs_greedy": "BFS (Greedy)",
     "dfs": "DFS",
-    "dijkstra": "Dijkstra",
     "astar": "A*",
 }
 ALGO_COLORS = {
-    "bfs": (229, 57, 53),
+    "bfs_optimal": (229, 57, 53),
+    "bfs_greedy": (251, 192, 45),
     "dfs": (67, 160, 71),
-    "dijkstra": (251, 192, 45),
-    "astar": (66, 133, 244),
+    "astar": (30, 136, 229),
 }
 
 BACKGROUND_COLOR = (232, 232, 232)
@@ -144,7 +144,7 @@ def validate_maze(data: Dict[str, Any]) -> None:
 def normalize_path(path_value: Any) -> List[Coord]:
     if not isinstance(path_value, list) or not path_value:
         raise ValueError("Result path must be a non-empty list.")
-    return [(int(p[0]), int(p[1])) for p in path_value]
+    return [(int(p[0]), int(p[1])) for p in path_value] # type: ignore
 
 
 def cell_weight(rows: int, cols: int, r: int, c: int) -> int:
@@ -227,7 +227,7 @@ def compute_stats_from_path(
 
 
 def normalize_result(name: str, raw: Dict[str, Any], maze_data: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(raw, dict):
+    if not isinstance(raw, dict): # type: ignore
         raise ValueError(f"{name}: result must be a dict.")
 
     rows = maze_data["meta"]["rows"]
@@ -306,7 +306,7 @@ def run_available_algorithms(
             continue
 
         raw = runner(maze_data)
-        results[algo_name] = normalize_result(algo_name, raw, maze_data)
+        results[algo_name] = normalize_result(algo_name, raw, maze_data) # type: ignore
 
     if requested_algo and requested_algo not in results:
         raise RuntimeError(f"Could not run: {requested_algo}")
@@ -508,7 +508,7 @@ class MazeRunViewer:
                     if label:
                         fs = max(10, min(26, int(cs * 0.50)))
                         lf = pygame.font.SysFont(None, fs, bold=True)
-                        s = lf.render(label, True, lc)
+                        s = lf.render(label, True, lc) # type: ignore
                         self.screen.blit(s, s.get_rect(center=(cx, cy)))
 
         ww = 1 if cs < 20 else 2 if cs < 60 else 3

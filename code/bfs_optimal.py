@@ -29,7 +29,6 @@ Path recorded:
 
 from __future__ import annotations
 
-from collections import deque
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 UP    = 1
@@ -52,49 +51,8 @@ def _open_neighbors(cells: List[List[int]], pos: Coord) -> List[Coord]:
     return result
 
 
-def _bfs_to_nearest(
-    cells: List[List[int]],
-    src: Coord,
-    targets: Set[Coord],
-) -> Optional[List[Coord]]:
-    """
-    BFS from src.  Stop as soon as ANY cell in *targets* is reached.
-    Returns the shortest path [src, ..., target], or None if unreachable.
-    This simulates a blind agent: it does not know which target is closer
-    in advance — it simply expands outward and stops at the first hit.
-    """
-    if src in targets:
-        return [src]
-
-    parent: Dict[Coord, Optional[Coord]] = {src: None}
-    queue: deque[Coord] = deque([src])
-
-    while queue:
-        cur = queue.popleft()
-        for nb in _open_neighbors(cells, cur):
-            if nb not in parent:
-                parent[nb] = cur
-                if nb in targets:
-                    # reconstruct path
-                    path: List[Coord] = []
-                    node: Optional[Coord] = nb
-                    while node is not None:
-                        path.append(node)
-                        node = parent[node]
-                    path.reverse()
-                    return path
-                queue.append(nb)
-
-    return None
 
 
-def _bfs_shortest_path(
-    cells: List[List[int]],
-    src: Coord,
-    dst: Coord,
-) -> Optional[List[Coord]]:
-    """BFS shortest path from src to a single destination."""
-    return _bfs_to_nearest(cells, src, {dst})
 
 
 
@@ -135,45 +93,66 @@ def _compute_stats(
     }
 
 
-def run_bfs_agent(data: Dict[str, Any]) -> Dict[str, Any]:
+def run_bfs_optimal_agent(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    BFS agent.
-
-    The agent does NOT receive key positions in advance.  Each phase it
-    runs BFS from its current cell and heads toward the nearest key it
-    finds during the breadth-first expansion.  After all keys are
-    collected it runs one final BFS to the exit.
+    BFS Agent (UNIFIED / OPTIMAL APPROACH)
+    
+    A differenza dell'approccio 'a fasi', questo agente esplora l'intero 
+    spazio degli stati usando la Tupla Booleana: S = ((r,c), (b1, b2, ...))
+    Questo garantisce l'ottimalità globale del percorso.
     """
     cells: List[List[int]] = data["cells"]
     start: Coord           = tuple(data["start"])
     exit_pos: Coord        = tuple(data["exit"])
     key_list: List[Coord]  = [tuple(k) for k in data["keys"]]
-
-    remaining: Set[Coord]   = set(key_list)
-    full_path: List[Coord]  = [start]
-    current: Coord          = start
-
-    while remaining:
-        sub = _bfs_to_nearest(cells, current, remaining)
-        if sub is None:
-            raise RuntimeError(
-                f"BFS: no reachable key from {current}. "
-                "Check maze connectivity."
-            )
-        # sub[0] == current, skip to avoid duplicate
-        full_path.extend(sub[1:])
-        found_key = sub[-1]
-        remaining.remove(found_key)
-        current = found_key
-
-    exit_sub = _bfs_shortest_path(cells, current, exit_pos)
-    if exit_sub is None:
-        raise RuntimeError(
-            f"BFS: exit unreachable from {current}. "
-            "Check maze connectivity."
-        )
-    full_path.extend(exit_sub[1:])
     
+    # Mappiamo ogni chiave a un indice fisso (es. chiave A è indice 0, B è 1...)
+    key_idx_map = {pos: i for i, pos in enumerate(key_list)}
+    num_keys = len(key_list)
+    
+    # STATO INIZIALE: Coordinate + Tupla di False
+    init_bools = tuple([False] * num_keys)
+    init_state = (start, init_bools)
+    
+    # La coda ora salva una tupla con (Stato_Logico, Percorso_Fino_A_Qui)
+    from collections import deque
+    queue = deque([(init_state, [start])])
+    
+    # EXPLORED SET: Salva interi stati logici (Proprietà di Markov rispettata)
+    visited = {init_state}
+    
+    full_path = None
+
+    while queue:
+        (curr_pos, curr_bools), path = queue.popleft()
+        
+        # GOAL TEST: Sei all'uscita E hai tutte le chiavi (tutti True)
+        if curr_pos == exit_pos and all(curr_bools):
+            full_path = path
+            break
+            
+        # Funzione Successore
+        for nb in _open_neighbors(cells, curr_pos):
+            # Copiamo la tupla booleana per non sporcare gli altri rami
+            new_bools = list(curr_bools)
+            
+            # Se la cella vicina ha una chiave, aggiorniamo il suo booleano a True
+            if nb in key_idx_map:
+                new_bools[key_idx_map[nb]] = True
+                
+            next_state = (nb, tuple(new_bools))
+            
+            # GRAPH SEARCH DUPLICATE DETECTION SAFE
+            # Passare sulla cella (5,5) con 0 chiavi è un nodo diverso
+            # dal passare sulla cella (5,5) con 1 chiave!
+            if next_state not in visited:
+                visited.add(next_state)
+                queue.append((next_state, path + [nb]))
+
+    if full_path is None:
+        raise RuntimeError("BFS: nessun percorso ottimale globale trovato.")
+
+    # Calcoliamo le statistiche usando la funzione già presente nel file originale
     stats = _compute_stats(full_path, set(key_list), exit_pos)
 
     return {
