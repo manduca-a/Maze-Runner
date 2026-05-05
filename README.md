@@ -14,21 +14,10 @@ The project supports both **unweighted** and **weighted** maze traversal, enabli
 
 ## Algorithms
 
-### Unweighted Search
-
-* **BFS (Breadth-First Search)**
-  Author: Yanzhe Xi
-
+* **BFS Optimal**
+* **BFS Greedy**
 * **DFS (Depth-First Search)**
-  Author: Yanzhe Xi
-
-### Weighted Search
-
-* **Dijkstra**
-  Author: Qizhen Dong
-
 * **A***
-  Author: Qizhen Dong
 
 ---
 
@@ -75,8 +64,6 @@ Search and routing are separated into two phases:
 ```
 maze_runner/
 ├── maze.json
-├── astar_result.json
-├── dijkstra_result.json
 ├── README.md
 ├── requirements.txt
 ├── .gitignore
@@ -84,10 +71,30 @@ maze_runner/
     ├── maze_generate.py
     ├── maze_display.py
     ├── maze_run.py
-    ├── bfs.py
+    ├── bfs_optimal.py
+    ├── bfs_greedy.py
     ├── dfs.py
-    ├── dijkstra.py
     └── astar.py
+```
+
+---
+
+## Setup
+
+Before running the project, make sure to install the required dependencies. It is recommended to use a virtual environment, especially on newer macOS/Linux systems to avoid environment errors.
+
+```bash
+# Create a virtual environment
+python3 -m venv venv
+
+# Activate the virtual environment
+# On macOS/Linux:
+source venv/bin/activate
+# On Windows:
+venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
 ---
@@ -105,9 +112,9 @@ python code/maze_display.py
 ### Run Algorithms
 
 ```
-python code/bfs.py
+python code/bfs_optimal.py
+python code/bfs_greedy.py
 python code/dfs.py
-python code/dijkstra.py
 python code/astar.py
 ```
 
@@ -134,10 +141,10 @@ Each algorithm produces:
 
 ## Key Observations
 
-* BFS minimizes steps, not cost
-* Dijkstra guarantees optimal cost
-* A* introduces directional bias and heuristic guidance
+* BFS Optimal finds the shortest path optimally
+* BFS Greedy finds a path quickly but might not be optimal
 * DFS is not optimal but useful as a baseline
+* A* introduces directional bias and heuristic guidance
 
 When loops are introduced into the maze, algorithm differences become significantly more visible.
 
@@ -153,6 +160,5 @@ When loops are introduced into the maze, algorithm differences become significan
 
 ## Authors
 
-* BFS / DFS: Yanzhe Xi
-* Dijkstra / A*: Qizhen Dong
-* System Design & Integration: Qizhen Dong
+* BFS Optimal / BFS Greedy / DFS: Yanzhe Xi
+* A* / System Design & Integration: Qizhen Dong
